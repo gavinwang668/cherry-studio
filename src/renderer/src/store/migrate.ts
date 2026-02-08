@@ -3208,8 +3208,8 @@ const migrateConfig = {
   '196': (state: RootState) => {
     try {
       state.llm.providers.forEach((provider) => {
-        if (provider.type === 'ollama' && provider.apiHost) {
-          provider.anthropicApiHost = provider.apiHost
+        if (provider.type === 'ollama') {
+          provider.anthropicApiHost = provider.apiHost || 'http://localhost:11434'
         }
       })
       logger.info('migrate 196 success')
