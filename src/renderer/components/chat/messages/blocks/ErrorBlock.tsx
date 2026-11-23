@@ -9,6 +9,7 @@ import { usePreference } from '@data/hooks/usePreference'
 import { loggerService } from '@logger'
 import { useTimer } from '@renderer/hooks/useTimer'
 import { getHttpMessageLabelKey, getProviderLabelKey } from '@renderer/i18n/label'
+import { trackChatErrorAction } from '@renderer/services/productAnalytics'
 import type { SerializedError } from '@renderer/types/error'
 import { getCherryCloudErrorPresentation } from '@renderer/utils/cherryCloudErrorPresentation'
 import { formatErrorMessageWithPrefix, providerErrorText } from '@renderer/utils/error'
@@ -223,6 +224,7 @@ const MessageErrorInfo: React.FC<{
         async () => {
           try {
             await removeMessageErrorPart?.({ messageId: message.id, partId })
+            trackChatErrorAction('dismiss', classification.category, message.topicId)
           } catch (error) {
             logger.error('Failed to dismiss message error part:', error as Error, { messageId: message.id, partId })
             notifyError?.(formatErrorMessageWithPrefix(error, t('message.error.dismiss_failed')))
@@ -231,10 +233,20 @@ const MessageErrorInfo: React.FC<{
         350
       )
     },
-    [message.id, notifyError, partId, removeMessageErrorPart, setTimeoutTimer, t]
+    [
+      classification.category,
+      message.id,
+      message.topicId,
+      notifyError,
+      partId,
+      removeMessageErrorPart,
+      setTimeoutTimer,
+      t
+    ]
   )
 
   const showErrorDetail = () => {
+    trackChatErrorAction('detail', classification.category, message.topicId)
     void openErrorDetail?.({
       message,
       error,
@@ -246,6 +258,7 @@ const MessageErrorInfo: React.FC<{
   const onNavigate = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (classification.navTarget) {
+      trackChatErrorAction('open_settings', classification.category, message.topicId)
       void navigateErrorTarget?.(classification.navTarget)
     }
   }
