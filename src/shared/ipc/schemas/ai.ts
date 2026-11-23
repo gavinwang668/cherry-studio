@@ -52,6 +52,7 @@ import { ReasoningEffortOptionSchema } from '@shared/types/aiSdk'
 import { AbsoluteFilePathSchema, FileVersionSchema } from '@shared/types/file'
 
 import { defineRoute } from '../define'
+import { agentCreateAnalyticsSchema } from './analytics'
 import { ImageBytesSchema } from './entityImage'
 
 /**
@@ -97,7 +98,9 @@ export const CreateAgentCommandSchema = AgentBaseSchema.extend({
    * Create-only: channels owned by the new Agent, created in the same DB transaction.
    * QR-login channels are always created inactive.
    */
-  channels: z.array(AgentChannelDraftSchema).optional()
+  channels: z.array(AgentChannelDraftSchema).optional(),
+  /** Analytics only: which UI created the Agent; stripped before persistence. */
+  analytics: agentCreateAnalyticsSchema.optional()
 })
 export type CreateAgentCommand = z.infer<typeof CreateAgentCommandSchema>
 
