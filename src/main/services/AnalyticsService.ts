@@ -54,6 +54,9 @@ function linkSignals(first: AbortSignal, second?: AbortSignal | null): AbortSign
 export class AnalyticsService extends BaseService implements Activatable {
   private client: AnalyticsClient | null = null
   private posthog: PostHog | null = null
+  /** Signed-in Cherry AI account's distinct id; product events fall back to the device id. */
+  private productAccountId: string | null = null
+  private identifiedProductAccountId: string | null = null
   private revokeController: AbortController | null = null
   private hasTrackedAppLaunch = false
   /** Consented product events raised while the clients are still starting; replayed once they are up. */
@@ -155,6 +158,7 @@ export class AnalyticsService extends BaseService implements Activatable {
       })
     }
 
+    this.identifyProductAccount()
     // app_opened precedes replayed events so funnels see the launch first.
     if (!this.hasTrackedAppLaunch) {
       this.client.trackAppLaunch({
@@ -176,6 +180,7 @@ export class AnalyticsService extends BaseService implements Activatable {
 
   async onDeactivate(): Promise<void> {
     this.productEventsReady = false
+    this.identifiedProductAccountId = null
     if (this.posthog) {
       // After a revocation the shared revoke signal fails every request, so the queue is dropped
       // without waiting out PostHog's retries.
@@ -229,12 +234,33 @@ export class AnalyticsService extends BaseService implements Activatable {
     this.pendingProductEvents.push(event)
   }
 
+  /** Binds later product events to the signed-in Cherry AI account; null returns them to the device id. */
+  public setProductAccount(accountDistinctId: string | null): void {
+    this.productAccountId = accountDistinctId
+    if (this.productEventsReady) this.identifyProductAccount()
+  }
+
+  // Merges this device's earlier anonymous events into the account, once per account and activation.
+  private identifyProductAccount(): void {
+    const accountId = this.productAccountId
+    if (!this.desiredEnabled || !accountId || accountId === this.identifiedProductAccountId) return
+    this.identifiedProductAccountId = accountId
+    this.capture(
+      '$identify',
+      { $anon_distinct_id: getClientId() },
+      { distinctId: accountId, processPersonProfile: true }
+    )
+  }
+
   private captureProductEvent({ event, ...fields }: ProductAnalyticsEvent): void {
     const properties: Record<string, string | number | boolean> = { schema_version: PRODUCT_EVENT_SCHEMA_VERSION }
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined) properties[key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] = value
     }
-    this.capture(event, properties)
+    const identity = this.productAccountId
+      ? { distinctId: this.productAccountId, processPersonProfile: true }
+      : undefined
+    this.capture(event, properties, identity)
   }
 
   private capture(
