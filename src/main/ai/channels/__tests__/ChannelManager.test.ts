@@ -310,7 +310,7 @@ describe('ChannelManager', () => {
 
       rows.push(makeChannel({ id: 'ch-new', type: 'dingtalk' }))
       manager.requestReconcile('ch-new')
-      manager.reportNextConnection('ch-new', 'dingtalk')
+      manager.reportNextConnection('ch-new', 'dingtalk', 'ui')
       await vi.waitFor(() => expect(adapters).toHaveLength(2))
       adapters[1].emit('statusChange', { channelId: 'ch-new', connected: true })
       adapters[1].emit('statusChange', { channelId: 'ch-new', connected: true })
@@ -321,6 +321,7 @@ describe('ChannelManager', () => {
           feature: 'channels',
           action: 'channel_connected',
           target: 'dingtalk',
+          origin: 'ui',
           status: 'success'
         }
       ])
@@ -341,7 +342,7 @@ describe('ChannelManager', () => {
         return adapter
       })
       manager.requestReconcile('ch-1')
-      manager.reportNextConnection('ch-1', 'telegram')
+      manager.reportNextConnection('ch-1', 'telegram', 'agent_tool')
 
       await vi.waitFor(() =>
         expect(reported()).toEqual([
@@ -350,6 +351,7 @@ describe('ChannelManager', () => {
             feature: 'channels',
             action: 'channel_connected',
             target: 'telegram',
+            origin: 'agent_tool',
             status: 'error'
           }
         ])
