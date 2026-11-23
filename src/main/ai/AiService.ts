@@ -1138,7 +1138,7 @@ export class AiService extends BaseService {
       trackMainProductEvent({
         event: 'feature_used',
         feature: 'paintings',
-        action: 'image_generated',
+        action: !payload.mode || payload.mode === 'generate' ? 'image_generated' : 'image_edited',
         status,
         ...(error !== undefined && {
           errorReason: toExecutionFailure(serializeError(error), payload.uniqueModelId).failure.reasonCode
