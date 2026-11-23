@@ -30,6 +30,7 @@ import {
   Phase,
   ServicePhase
 } from '@main/core/lifecycle'
+import { analyticsAgentKind, analyticsModelSource, trackMainProductEvent } from '@main/services/productAnalytics'
 import { topicNamingService } from '@main/services/TopicNamingService'
 import { AGENT_RUNTIME_CAPABILITIES } from '@shared/ai/agentRuntimeCapabilities'
 import { AGENT_SESSION_API_RETRY_CACHE_KEY, type AgentSessionApiRetryInfo } from '@shared/ai/agentSessionApiRetry'
@@ -238,6 +239,7 @@ type AgentSessionRun = {
   forkAnchor?: RuntimeForkAnchor
   /** Stream attachment correlation, independent of durable execution ownership. */
   turnId: string
+  startedAt: number
   /** True when the user message arrived as a steer — admission wraps it in a system-reminder. */
   systemReminder?: boolean
   /** The existing assistant record ID; steer never changes this owner. */
@@ -1533,6 +1535,7 @@ export class AgentSessionRuntimeService extends BaseService {
     const isRowRoll =
       entry.runtimeState.execution.kind === 'run-handoff' && entry.runtimeState.execution.source.turn === completedTurn
     this.applyRuntimeStateEvent(entry, { type: 'turn-terminal', turn: completedTurn, status })
+    this.trackTurnFinished(entry, completedTurn, status)
     if (status === 'success' && !isRowRoll) this.startPromptPrediction(entry)
     const terminal: AgentSessionTurnTerminalEvent = {
       sessionId,
@@ -1626,6 +1629,27 @@ export class AgentSessionRuntimeService extends BaseService {
       this.settleFromNativeOutcome(entry, this.rootProjection(entry, connection.contextId), stopped.replyId, outcome)
     } catch (error) {
       logger.warn('Failed to apply the native outcome to a stopped reply', { sessionId: entry.sessionId, error })
+    }
+  }
+
+  private trackTurnFinished(
+    entry: AgentSessionRuntimeEntry,
+    turn: AgentSessionRun,
+    status: AgentSessionRuntimeTerminalStatus
+  ): void {
+    try {
+      trackMainProductEvent({
+        event: 'agent_turn_finished',
+        status: status === 'paused' ? 'stopped' : status,
+        // Scheduled tasks, channel messages, and runtime-opened turns are not a user asking.
+        trigger: turn.headless || turn.origin ? 'headless' : 'user',
+        agentKind: analyticsAgentKind(entry.agentId),
+        modelSource: analyticsModelSource(parseUniqueModelId(turn.modelId).providerId),
+        durationMs: Date.now() - turn.startedAt,
+        toolCallCount: turn.projection?.parts(turn.runId)?.filter(isToolUIPart).length ?? 0
+      })
+    } catch (error) {
+      logger.debug('Skipped agent turn analytics', { sessionId: entry.sessionId, error })
     }
   }
 
@@ -4435,12 +4459,13 @@ function runInputOutcome(inputs: readonly NativeInputState[]): NativeInputState 
 function createSessionRun(
   input: Omit<
     AgentSessionRun,
-    'turnId' | 'runId' | 'abortController' | 'activeToolIds' | 'controller' | 'projection'
+    'turnId' | 'runId' | 'startedAt' | 'abortController' | 'activeToolIds' | 'controller' | 'projection'
   > & { runId?: string }
 ): AgentSessionRun {
   return {
     ...input,
     turnId: crypto.randomUUID(),
+    startedAt: Date.now(),
     runId: input.runId ?? uuidv7(),
     // oxlint-disable-next-line no-restricted-globals -- Detach per-turn model/settings metadata from the caller-owned turn input.
     messageSnapshot: input.messageSnapshot ? structuredClone(input.messageSnapshot) : undefined,
