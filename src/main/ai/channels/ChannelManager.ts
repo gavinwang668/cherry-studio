@@ -5,8 +5,9 @@ import { loggerService } from '@logger'
 import { BaseService, DependsOn, type Disposable, Injectable, Phase, ServicePhase } from '@main/core/lifecycle'
 import { WindowType } from '@main/core/window/types'
 import { t } from '@main/i18n'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 import { isQrLoginChannel } from '@shared/data/api/schemas/agentChannels'
-import type { ChannelConfig } from '@shared/data/types/channel'
+import type { ChannelConfig, ChannelType } from '@shared/data/types/channel'
 import type { IpcEventName } from '@shared/ipc/schemas/ipcSchemas'
 import type { EventPayload, WindowId } from '@shared/ipc/types'
 
@@ -30,6 +31,8 @@ export class ChannelManager extends BaseService {
   private readonly runtimes = new Map<string, ChannelRuntime>()
   private readonly qrLogins = new Map<string, QrLogin>()
   private readonly channelLogs = new ChannelLogBuffer()
+  // Channels a user just set up, awaiting their first connect outcome; startup reconnects never enter.
+  private readonly pendingConnectionReports = new Map<string, ChannelType>()
   private acceptingConnections = false
 
   protected async onReady(): Promise<void> {
@@ -154,10 +157,16 @@ export class ChannelManager extends BaseService {
     }
   }
 
+  /** Report the next connect success or failure of a channel the user just set up. */
+  reportNextConnection(channelId: string, type: ChannelType): void {
+    this.pendingConnectionReports.set(channelId, type)
+  }
+
   async removeChannel(channelId: string): Promise<void> {
     this.finishQrLogin(channelId)
     const runtime = this.runtimes.get(channelId)
     this.runtimes.delete(channelId)
+    this.pendingConnectionReports.delete(channelId)
     this.channelLogs.remove(channelId)
     if (runtime) {
       runtime.requestReconcile()
@@ -325,6 +334,16 @@ export class ChannelManager extends BaseService {
 
   private publishStatus(status: ChannelStatusEvent): void {
     application.get('CacheService').setShared(`channel.status.${status.channelId}`, status)
+    const type = this.pendingConnectionReports.get(status.channelId)
+    if (!type || (!status.connected && !status.error)) return
+    this.pendingConnectionReports.delete(status.channelId)
+    trackMainProductEvent({
+      event: 'feature_used',
+      feature: 'channels',
+      action: 'channel_connected',
+      target: type,
+      status: status.connected ? 'success' : 'error'
+    })
   }
 
   private sendToRenderer<E extends IpcEventName>(event: E, data: EventPayload<E>): void {
