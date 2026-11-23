@@ -9,7 +9,7 @@ import { type Activatable, BaseService, Injectable, Phase, ServicePhase } from '
 import { getAppEdition } from '@main/utils/appEdition'
 import { isDataCollectionConsented } from '@main/utils/privacyConsent'
 import { generateUserAgent, getClientId } from '@main/utils/systemInfo'
-import type { ProductAnalyticsEvent } from '@shared/ipc/schemas/analytics'
+import { BEHAVIOR_ANALYTICS_EVENTS, type ProductAnalyticsEvent } from '@shared/ipc/schemas/analytics'
 import { APP_NAME } from '@shared/utils/constants'
 
 const logger = loggerService.withContext('AnalyticsService')
@@ -26,6 +26,17 @@ function resolvePostHogKey(): string {
   if (override) return override
   return import.meta.env.DEV ? '' : POSTHOG_PROJECT_KEY
 }
+
+// Development builds and builds pointed at another PostHog project or Cloud backend send test traffic.
+function isProductTestTraffic(): boolean {
+  return (
+    import.meta.env.DEV ||
+    !!import.meta.env.MAIN_VITE_POSTHOG_KEY?.trim() ||
+    !!import.meta.env.MAIN_VITE_CHERRY_CLOUD_API_ORIGIN?.trim()
+  )
+}
+
+const behaviorEvents: ReadonlySet<string> = new Set(BEHAVIOR_ANALYTICS_EVENTS)
 
 // Distinct name so the SDK retry classifier treats it as non-retriable.
 class ConsentRevokedError extends Error {
@@ -226,6 +237,7 @@ export class AnalyticsService extends BaseService implements Activatable {
   /** Captures a catalogued product event anonymously; events raised before start-up are replayed. */
   public trackProductEvent(event: ProductAnalyticsEvent): void {
     if (!this.desiredEnabled) return
+    if (behaviorEvents.has(event.event) && import.meta.env.MAIN_VITE_ANALYTICS_BEHAVIOR_EVENTS !== 'true') return
     if (this.productEventsReady) {
       this.captureProductEvent(event)
       return
@@ -253,7 +265,14 @@ export class AnalyticsService extends BaseService implements Activatable {
   }
 
   private captureProductEvent({ event, ...fields }: ProductAnalyticsEvent): void {
-    const properties: Record<string, string | number | boolean> = { schema_version: PRODUCT_EVENT_SCHEMA_VERSION }
+    const now = new Date()
+    // Local clock only (no time zone name), so activity can be read in users' local time.
+    const properties: Record<string, string | number | boolean> = {
+      schema_version: PRODUCT_EVENT_SCHEMA_VERSION,
+      test: isProductTestTraffic(),
+      local_hour: now.getHours(),
+      local_weekday: ((now.getDay() + 6) % 7) + 1
+    }
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined) properties[key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] = value
     }
